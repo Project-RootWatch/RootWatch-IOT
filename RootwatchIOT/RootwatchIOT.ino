@@ -18,35 +18,39 @@ uint64_t addr[MAX_DEVS];
 
 // ---------------- Soil moisture ----------------
 #define SOIL_PIN 3
-// TODO: replace after calibration (dry = high, wet = low)
-const int SOIL_DRY_MV = 2600;
+const int SOIL_DRY_MV = 2600;   // <-- your calibrated values
 const int SOIL_WET_MV = 1200;
+
+// ---------------- Light (LDR) ----------------
+#define LDR_PIN 1
+const int LIGHT_DARK_MV   = 150;    // <-- calibrate: covered
+const int LIGHT_BRIGHT_MV = 2900;   // <-- calibrate: bright light
 
 // ---------------- Timing ----------------
 const unsigned long TEMP_CONVERSION_MS = 750;
 const unsigned long SAMPLE_INTERVAL_MS = 2000;
 
 unsigned long lastSampleStart = 0;
-unsigned long tempRequestedAt  = 0;
+unsigned long tempRequestedAt = 0;
 bool tempPending = false;
 
 // ---------------- Readings ----------------
 float temperature = 0;
 bool  tempValid   = false;
-int   soilRawMv   = 0;
-int   soilPercent = 0;
+int   soilRawMv = 0, soilPercent = 0;
+int   lightRawMv = 0, lightPercent = 0;
 
-int readSoilMv() {
+int readAvgMv(int pin) {
   long sum = 0;
-  for (int i = 0; i < 16; i++) {       // average to suppress ADC noise
-    sum += analogReadMilliVolts(SOIL_PIN);
+  for (int i = 0; i < 16; i++) {
+    sum += analogReadMilliVolts(pin);
     delayMicroseconds(200);
   }
   return sum / 16;
 }
 
-int soilToPercent(int mv) {
-  long pct = map(mv, SOIL_DRY_MV, SOIL_WET_MV, 0, 100);
+int toPercent(int mv, int atZero, int atHundred) {
+  long pct = map(mv, atZero, atHundred, 0, 100);
   return constrain(pct, 0, 100);
 }
 
@@ -73,12 +77,13 @@ void setup() {
   showStatus("Initializing...");
   delay(1500);
 
-  analogSetPinAttenuation(SOIL_PIN, ADC_11db);   // full ~0-3.1V range
+  analogSetPinAttenuation(SOIL_PIN, ADC_11db);
+  analogSetPinAttenuation(LDR_PIN,  ADC_11db);
 
   uint8_t devices = ds.search(addr, MAX_DEVS);
   Serial.printf("Devices Found: %u\n", devices);
   if (devices == 0) {
-    Serial.println("No DS18B20 detected! Check wiring/pull-up resistor.");
+    Serial.println("No DS18B20 detected!");
     showStatus("No temp sensor!");
     while (1) delay(100);
   }
@@ -87,37 +92,35 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
-  // --- Start a sampling cycle ---
   if (!tempPending && now - lastSampleStart >= SAMPLE_INTERVAL_MS) {
     lastSampleStart = now;
     ds.request();
     tempRequestedAt = now;
     tempPending = true;
 
-    soilRawMv   = readSoilMv();
-    soilPercent = soilToPercent(soilRawMv);
+    soilRawMv    = readAvgMv(SOIL_PIN);
+    soilPercent  = toPercent(soilRawMv, SOIL_DRY_MV, SOIL_WET_MV);
+
+    lightRawMv   = readAvgMv(LDR_PIN);
+    lightPercent = toPercent(lightRawMv, LIGHT_DARK_MV, LIGHT_BRIGHT_MV);
   }
 
-  // --- Collect the temperature once conversion has had time ---
   if (tempPending && now - tempRequestedAt >= TEMP_CONVERSION_MS) {
     tempPending = false;
     tempValid = (ds.getTemp(addr[0], temperature) == 0);
 
-    Serial.printf("Soil raw: %d mV | Soil: %d%% | Temp: ",
-                  soilRawMv, soilPercent);
-    if (tempValid) Serial.printf("%.1f C\n", temperature);
-    else           Serial.println("ERROR");
+    Serial.printf("Temp: %.1f C | Soil: %d%% (%d mV) | Light: %d%% (%d mV)\n",
+                  temperature, soilPercent, soilRawMv,
+                  lightPercent, lightRawMv);
 
     display.clearDisplay();
     display.setCursor(0, 0);
-    if (tempValid) display.printf("Temp: %.1f C\n", temperature);
-    else           display.println("Temp: error");
+    if (tempValid) display.printf("Temp: %.1f C", temperature);
+    else           display.print("Temp: error");
     display.setCursor(0, 12);
-    display.printf("Soil: %d%%", soilPercent);
+    display.printf("Soil:  %d%%", soilPercent);
     display.setCursor(0, 24);
-    display.printf("raw %d mV", soilRawMv);
+    display.printf("Light: %d%%", lightPercent);
     display.display();
   }
-
-  // loop stays free here for WiFi, buttons, etc.
 }
