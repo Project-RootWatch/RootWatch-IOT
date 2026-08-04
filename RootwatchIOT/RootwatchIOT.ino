@@ -91,11 +91,17 @@ void ensureWifi() {
 bool postReading() {
   if (WiFi.status() != WL_CONNECTED) return false;
 
+  // Field names below must match RootWatch-BackEnd's /api/readings contract
+  // exactly (see RootWatch-BackEnd/routes/sensors.py REQUIRED_FIELDS) — the
+  // backend rejects anything else with a 400. device_id/uptime_ms/etc. are
+  // extra context the backend currently ignores, kept for future debugging.
+  // color_r/g/b are omitted until the TCS3200 is wired up; the backend
+  // treats them as optional.
   char body[256];
   snprintf(body, sizeof(body),
-    "{\"device_id\":\"%s\",\"temperature_c\":%.2f,"
-    "\"soil_percent\":%d,\"soil_raw_mv\":%d,"
-    "\"light_percent\":%d,\"light_digital\":%s,"
+    "{\"device_id\":\"%s\",\"temperature\":%.2f,"
+    "\"soil_moisture\":%d,\"soil_raw_mv\":%d,"
+    "\"light_level\":%d,\"light_digital\":%s,"
     "\"uptime_ms\":%lu}",
     DEVICE_ID, temperature, soilPercent, soilRawMv,
     lightPercent, lightIsDigital ? "true" : "false", millis());
